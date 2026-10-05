@@ -31,11 +31,44 @@ Abre la web publicada en GitHub Pages, pulsa **Empezar** y acepta las notificaci
 2. Elige la rama con la app y la carpeta **/ (root)**, y guarda.
 3. En un par de minutos estará en `https://hectorlagocarrera.github.io/levantarse/`. Cada push a esa rama la actualiza.
 
+## Avisos con el móvil bloqueado (servidor gratuito en Cloudflare)
+
+iOS congela las webs cuando bloqueas el iPhone, así que los avisos a su hora los envía un pequeño servidor
+(`worker/`, Cloudflare Workers + Durable Objects, gratis) mediante notificaciones push. La app le manda su ciclo
+y el servidor calcula los mismos cambios de fase con `schedule.js`, el mismo código que usa la app.
+
+Configuración (una sola vez):
+
+1. Crea una cuenta gratuita en https://dash.cloudflare.com/sign-up y entra en **Workers & Pages**
+   (si te pide elegir un subdominio `*.workers.dev`, elige uno).
+2. Copia tu **Account ID** (aparece en la página de Workers & Pages, columna derecha).
+3. Crea un token: **My Profile → API Tokens → Create Token → plantilla «Edit Cloudflare Workers»** → Continue → Create.
+4. En GitHub: **Settings → Secrets and variables → Actions → New repository secret** y crea:
+   - `CLOUDFLARE_API_TOKEN` con el token.
+   - `CLOUDFLARE_ACCOUNT_ID` con el Account ID.
+5. En la pestaña **Actions**, ejecuta «Publicar servidor de avisos» (**Run workflow**).
+6. Pon la dirección que aparece al final (`https://levantarse-push.<tu-subdominio>.workers.dev`) en `config.js`.
+
+En el iPhone (iOS 16.4 o posterior): abre la web en Safari → **Compartir → Añadir a pantalla de inicio**, abre la app
+desde ese icono, pulsa **Empezar** y acepta las notificaciones. En Ajustes, «Probar con el móvil bloqueado» envía un
+aviso de prueba a los 10 segundos.
+
+Notas:
+- Los avisos de vista 20-20-20 y el «ahora muévete» de Cornell solo suenan con la app abierta.
+- Con el móvil bloqueado suena el sonido de notificación de iOS; el sonido elegido en la app solo se oye con la app abierta.
+- Sin horario laboral, el servidor se detiene solo tras 14 horas por si olvidas pararlo.
+
 ## Desarrollo local
 
-No necesita compilación: es HTML, CSS y JavaScript puro.
+La app no necesita compilación: es HTML, CSS y JavaScript puro.
 
 ```bash
 python3 -m http.server 8000
 # abre http://localhost:8000
+
+# pruebas de la lógica de ciclos
+node worker/test/schedule.test.mjs
+
+# servidor de avisos en local
+cd worker && npx wrangler dev
 ```

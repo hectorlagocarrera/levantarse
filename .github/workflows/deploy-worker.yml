@@ -1,0 +1,51 @@
+name: Publicar servidor de avisos
+
+on:
+  push:
+    paths:
+      - 'worker/**'
+      - 'schedule.js'
+      - '.github/workflows/deploy-worker.yml'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Probar la lógica de ciclos
+        run: node worker/test/schedule.test.mjs
+
+      - name: Comprobar credenciales de Cloudflare
+        id: creds
+        env:
+          TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ -z "$TOKEN" ] || [ -z "$ACCOUNT" ]; then
+            echo "::notice::Faltan los secretos CLOUDFLARE_API_TOKEN y CLOUDFLARE_ACCOUNT_ID. Consulta el README."
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publicar en Cloudflare Workers
+        id: deploy
+        if: steps.creds.outputs.ok == 'true'
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: worker
+          command: deploy
+
+      - name: Dirección del servidor
+        if: steps.creds.outputs.ok == 'true'
+        run: |
+          echo "Servidor publicado en: ${{ steps.deploy.outputs.deployment-url }}"
+          echo "### Servidor publicado en ${{ steps.deploy.outputs.deployment-url }}" >> "$GITHUB_STEP_SUMMARY"

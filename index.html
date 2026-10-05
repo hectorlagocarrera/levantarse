@@ -89,6 +89,11 @@
 
     <section class="card">
       <h2>Ajustes</h2>
+      <div class="push-box" id="pushBox">
+        <strong>Avisos con el móvil bloqueado</strong>
+        <p id="pushStatus">Comprobando…</p>
+        <button class="btn small-btn" id="pushTestBtn" type="button">Probar con el móvil bloqueado</button>
+      </div>
       <label class="toggle"><input type="checkbox" id="soundToggle"> Sonido de aviso</label>
       <div class="sound-box" id="soundBox">
         <label>Sonido
@@ -135,6 +140,6 @@
     </footer>
   </main>
 
-  <script src="app.js"></script>
+  <script type="module" src="app.js"></script>
 </body>
 </html>

@@ -1,0 +1,20 @@
+name = "levantarse-push"
+main = "src/index.js"
+compatibility_date = "2025-09-01"
+workers_dev = true
+
+[[durable_objects.bindings]]
+name = "SCHEDULER"
+class_name = "Scheduler"
+
+[[durable_objects.bindings]]
+name = "KEYS"
+class_name = "Keys"
+
+# Durable Objects con SQLite: incluidos en el plan gratuito de Cloudflare.
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Scheduler", "Keys"]
+
+[observability]
+enabled = true

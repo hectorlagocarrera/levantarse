@@ -1,10 +1,12 @@
 // Service worker: funcionamiento sin conexión y gestión de clics en notificaciones.
-const CACHE = 'levantarse-v3';
+const CACHE = 'levantarse-v4';
 const ASSETS = [
   './',
   'index.html',
   'styles.css',
   'app.js',
+  'schedule.js',
+  'config.js',
   'manifest.webmanifest',
   'icons/icon.svg',
   'icons/icon-192.png',
@@ -35,6 +37,26 @@ self.addEventListener('fetch', (event) => {
       })
       .catch(() => caches.match(event.request)),
   );
+});
+
+// Avisos enviados por el servidor: llegan aunque el móvil esté bloqueado o la app cerrada.
+self.addEventListener('push', (event) => {
+  let data = {};
+  try { data = event.data ? event.data.json() : {}; } catch { /* sin datos */ }
+  const kind = data.kind || 'aviso';
+  event.waitUntil(Promise.all([
+    self.registration.showNotification(data.title || 'Levántate', {
+      body: data.body || '',
+      tag: 'levantarse-' + kind,
+      renotify: true,
+      icon: 'icons/icon-192.png',
+      badge: 'icons/icon-192.png',
+      requireInteraction: kind === 'stand',
+      data,
+    }),
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+      .then((list) => list.forEach((c) => c.postMessage({ type: 'push', kind }))),
+  ]));
 });
 
 self.addEventListener('notificationclick', (event) => {

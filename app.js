@@ -1,4 +1,5 @@
-'use strict';
+import { advance, nextWindowStart } from './schedule.js';
+import { PUSH_URL } from './config.js';
 
 // ---------- Datos ----------
 
@@ -91,18 +92,21 @@ function save(key, value) {
 }
 
 let settings = { ...DEFAULT_SETTINGS, ...load(KEYS.settings, {}) };
-// phase: 'idle' | 'sit' | 'stand'
-let state = {
-  phase: 'idle',
-  phaseStart: 0,
+// running: temporizador en marcha. phase: 'sit' | 'stand'. off: fuera de horario. paused: ms restantes si está en pausa.
+const IDLE_STATE = {
+  running: false,
+  phase: 'sit',
   phaseEnd: 0,
+  cursor: 0,
   duration: 0,
-  pausedRemaining: null,
-  autoPaused: false,
+  off: false,
+  paused: null,
+  startedAt: 0,
   nextEyes: null,
   moveAlerted: false,
-  ...load(KEYS.state, {}),
 };
+let state = { ...IDLE_STATE, ...load(KEYS.state, {}) };
+if (typeof state.running !== 'boolean') state = { ...IDLE_STATE }; // estado de una versión anterior
 let history = load(KEYS.history, {});
 
 const saveSettings = () => save(KEYS.settings, settings);
@@ -135,10 +139,15 @@ function pruneHistory() {
 
 function fmt(ms) {
   const total = Math.max(0, Math.ceil(ms / 1000));
-  const m = Math.floor(total / 60);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
   const s = total % 60;
-  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  const mm = String(m).padStart(2, '0');
+  const ss = String(s).padStart(2, '0');
+  return h ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
 }
+
+const clock = (t) => new Date(t).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
 
 function durations() {
   if (settings.preset === 'custom') return { sit: settings.sit, stand: settings.stand };
@@ -146,17 +155,16 @@ function durations() {
   return { sit: p.sit, stand: p.stand };
 }
 
-function minutesOfDay(hhmm) {
-  const [h, m] = hhmm.split(':').map(Number);
-  return h * 60 + m;
-}
+const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 
-function withinHours(d = new Date()) {
-  if (!settings.hoursOn) return true;
-  const now = d.getHours() * 60 + d.getMinutes();
-  const from = minutesOfDay(settings.from);
-  const to = minutesOfDay(settings.to);
-  return from <= to ? now >= from && now < to : now >= from || now < to;
+// Configuración del ciclo en el formato que comparten la app y el servidor (schedule.js).
+function cycleCfg() {
+  const d = durations();
+  return {
+    sitMs: d.sit * MIN,
+    standMs: d.stand * MIN,
+    hours: { on: settings.hoursOn, from: settings.from, to: settings.to, tz: TZ },
+  };
 }
 
 // ---------- Avisos: sonido, vibración, notificación ----------
@@ -292,6 +300,8 @@ async function notify(kind, title, body) {
     navigator.vibrate(kind === 'stand' ? [300, 150, 300, 150, 300] : [200, 100, 200]);
   }
   if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  // Con el servidor activo, esas notificaciones ya llegan por push: evita duplicarlas.
+  if (pushSub && (kind === 'stand' || kind === 'sit')) return;
   const options = {
     body,
     tag: 'levantarse-' + kind,
@@ -328,7 +338,7 @@ const IS_STANDALONE = window.matchMedia('(display-mode: standalone)').matches ||
 let wakeLock = null;
 
 async function updateWakeLock() {
-  const want = settings.wakeLock && state.phase !== 'idle' && !document.hidden;
+  const want = settings.wakeLock && state.running && !document.hidden;
   if (want && !wakeLock && 'wakeLock' in navigator) {
     try {
       wakeLock = await navigator.wakeLock.request('screen');
@@ -348,108 +358,232 @@ function renderIosHelp() {
   box.open = !IS_STANDALONE;
 }
 
-// ---------- Lógica del temporizador ----------
+// ---------- Avisos con el móvil bloqueado (servidor push) ----------
 
-function startPhase(phase, now = Date.now()) {
-  const d = durations();
-  const minutes = phase === 'sit' ? d.sit : d.stand;
-  state.phase = phase;
-  state.phaseStart = now;
-  state.duration = minutes * MIN;
-  state.phaseEnd = now + state.duration;
-  state.pausedRemaining = null;
-  state.autoPaused = false;
-  state.moveAlerted = false;
-  state.nextEyes = phase === 'sit' && settings.eyes && minutes > 20 ? now + 20 * MIN : null;
-  if (phase === 'stand') pickExercise();
-  saveState();
-  updateWakeLock();
+let pushSub = null;
+let pushStatus = 'checking';
+let pushNext = null;
+let syncTimer = null;
+
+function b64ToBytes(s) {
+  const b = atob(s.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((s.length + 3) % 4));
+  return Uint8Array.from(b, (c) => c.charCodeAt(0));
 }
 
-function start() {
+async function api(path, body) {
+  const res = await fetch(PUSH_URL + path, {
+    method: body ? 'POST' : 'GET',
+    headers: body ? { 'Content-Type': 'application/json' } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  return res.json();
+}
+
+function pushSupported() {
+  return 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+}
+
+// interactive: se llama desde un botón, así que puede pedir permiso y crear la suscripción.
+async function ensurePush(interactive) {
+  if (!PUSH_URL) { pushStatus = 'unconfigured'; renderPush(); return null; }
+  if (!pushSupported()) {
+    pushStatus = IS_IOS && !IS_STANDALONE ? 'needs-install' : 'unsupported';
+    renderPush();
+    return null;
+  }
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub && interactive && Notification.permission === 'granted') {
+      const { publicKey } = await api('/vapid');
+      sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(publicKey) });
+    }
+    pushSub = sub;
+    pushStatus = sub ? 'on' : Notification.permission === 'denied' ? 'denied' : 'off';
+  } catch (err) {
+    console.warn('push', err);
+    pushStatus = Notification.permission === 'denied' ? 'denied' : 'error';
+  }
+  renderPush();
+  return pushSub;
+}
+
+// Envía al servidor el estado actual para que programe los avisos (o los cancele).
+function syncPush() {
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(async () => {
+    if (!pushSub) return;
+    try {
+      if (state.running && state.paused == null) {
+        const { phase, phaseEnd, off, cursor, duration } = state;
+        const r = await api('/schedule', {
+          subscription: pushSub.toJSON(),
+          plan: { state: { phase, phaseEnd, off, cursor, duration }, cfg: cycleCfg(), startedAt: state.startedAt },
+        });
+        pushNext = r.next;
+      } else {
+        await api('/cancel', { endpoint: pushSub.endpoint });
+        pushNext = null;
+      }
+      pushStatus = 'on';
+    } catch (err) {
+      console.warn('sync', err);
+      pushStatus = 'error';
+    }
+    renderPush();
+  }, 300);
+}
+
+async function testPush() {
   unlockAudio();
-  requestPermission();
-  startPhase('sit');
+  await requestPermission();
+  const sub = await ensurePush(true);
+  if (!sub) return;
+  try {
+    await api('/test', { subscription: sub.toJSON(), delaySeconds: 10 });
+    $('pushStatus').textContent = 'Bloquea el móvil ahora: el aviso de prueba llegará en 10 segundos.';
+  } catch {
+    pushStatus = 'error';
+    renderPush();
+  }
+}
+
+function renderPush() {
+  const msgs = {
+    checking: 'Comprobando…',
+    unconfigured: 'El servidor de avisos aún no está configurado. Mientras tanto, deja la app abierta en primer plano.',
+    'needs-install': 'Para recibirlos en iPhone, añade la app a la pantalla de inicio (Compartir → Añadir a pantalla de inicio) y ábrela desde allí.',
+    unsupported: 'Este navegador no admite notificaciones push. Deja la app abierta en primer plano.',
+    denied: 'Has bloqueado las notificaciones. Actívalas en Ajustes del iPhone → Notificaciones → Levántate.',
+    off: 'Desactivados. Pulsa «Empezar» o «Probar» y acepta las notificaciones.',
+    error: 'No se pudo contactar con el servidor de avisos. Se reintentará; mientras, deja la app abierta.',
+  };
+  let text = msgs[pushStatus];
+  if (pushStatus === 'on') {
+    text = '✓ Activados: te llegarán aunque el móvil esté bloqueado.';
+    if (state.running && state.paused == null && pushNext) {
+      text += ` Próximo aviso a las ${clock(pushNext.at)}.`;
+    }
+  }
+  $('pushStatus').textContent = text;
+  $('pushBox').classList.toggle('push-on', pushStatus === 'on');
+  $('pushTestBtn').classList.toggle('hidden', ['unconfigured', 'unsupported', 'needs-install', 'denied'].includes(pushStatus));
+}
+
+// ---------- Lógica del temporizador ----------
+
+function startPhase(phase, at = Date.now()) {
+  const d = durations();
+  const dur = (phase === 'sit' ? d.sit : d.stand) * MIN;
+  Object.assign(state, {
+    phase, cursor: at, duration: dur, phaseEnd: at + dur, off: false, paused: null, moveAlerted: false,
+  });
+  resetEyes();
+  if (phase === 'stand') pickExercise();
+}
+
+function resetEyes() {
+  state.nextEyes = state.phase === 'sit' && !state.off && settings.eyes && state.duration > 20 * MIN
+    ? state.cursor + 20 * MIN : null;
+}
+
+function changed() {
+  saveState();
+  updateWakeLock();
+  syncPush();
   render();
+}
+
+async function start() {
+  unlockAudio();
+  const perm = requestPermission(); // primero, para que iOS lo asocie al toque
+  const now = Date.now();
+  state.running = true;
+  state.startedAt = now;
+  startPhase('sit', now);
+  tick();
+  changed();
+  await perm;
+  if (await ensurePush(true)) syncPush();
 }
 
 function stop() {
-  state = { ...state, phase: 'idle', pausedRemaining: null, autoPaused: false, nextEyes: null };
-  saveState();
-  updateWakeLock();
-  render();
+  state = { ...IDLE_STATE };
+  changed();
 }
 
 function togglePause() {
   unlockAudio();
   const now = Date.now();
-  if (state.pausedRemaining != null) {
-    resume(now);
+  if (state.paused != null) {
+    const shift = now - (state.phaseEnd - state.paused);
+    state.phaseEnd = now + state.paused;
+    state.cursor = now;
+    if (state.nextEyes) state.nextEyes += shift;
+    state.paused = null;
   } else {
-    pause(now, false);
+    state.paused = Math.max(0, state.phaseEnd - now);
   }
-  render();
-}
-
-function pause(now, auto) {
-  state.pausedRemaining = Math.max(0, state.phaseEnd - now);
-  state.autoPaused = auto;
-  saveState();
-}
-
-function resume(now) {
-  const shift = now - (state.phaseEnd - state.pausedRemaining);
-  state.phaseEnd = now + state.pausedRemaining;
-  if (state.nextEyes) state.nextEyes += shift;
-  state.pausedRemaining = null;
-  state.autoPaused = false;
-  saveState();
+  changed();
 }
 
 function skip() {
   unlockAudio();
   if (state.phase === 'sit') {
     startPhase('stand');
-  } else if (state.phase === 'stand') {
+  } else {
     today().skipped += 1;
     saveHistory();
     startPhase('sit');
   }
-  render();
+  changed();
 }
 
-function onSitEnd(now) {
-  const sitMin = Math.round(state.duration / MIN);
-  startPhase('stand', now);
-  const standMin = Math.round(state.duration / MIN);
-  notify('stand', '¡Levántate!', `Llevas ${sitMin} min sentado. Ponte de pie y muévete ${standMin} min.`);
-}
-
-function onStandEnd(now) {
-  const t = today();
-  t.breaks += 1;
-  t.standMin += Math.round(state.duration / MIN);
-  saveHistory();
-  startPhase('sit', now);
-  const msg = t.breaks >= settings.goal
-    ? `¡Objetivo diario cumplido! Llevas ${t.breaks} pausas hoy.`
-    : `Pausa ${t.breaks} de ${settings.goal}. Te avisaremos dentro de ${durations().sit} min.`;
-  notify('sit', 'Ya puedes sentarte', msg);
+function alertFor(kind) {
+  if (kind === 'stand') {
+    notify('stand', '¡Levántate!', `Llevas ${durations().sit} min sentado. Ponte de pie y muévete ${Math.round(state.duration / MIN)} min.`);
+  } else {
+    const t = today();
+    const msg = t.breaks >= settings.goal
+      ? `¡Objetivo diario cumplido! Llevas ${t.breaks} pausas hoy.`
+      : `Pausa ${t.breaks} de ${settings.goal}. Te avisaremos dentro de ${durations().sit} min.`;
+    notify('sit', 'Ya puedes sentarte', msg);
+  }
 }
 
 function tick() {
   const now = Date.now();
-  if (state.phase === 'idle') return;
+  if (!state.running || state.paused != null) { render(); return; }
 
-  // Horario laboral: pausa automática fuera de horario y reanuda al volver.
-  const inHours = withinHours(new Date(now));
-  if (!inHours && state.pausedRemaining == null) {
-    pause(now, true);
-  } else if (inHours && state.autoPaused) {
-    resume(now);
+  // Avanza por todas las fases que hayan terminado (también si el móvil estuvo bloqueado).
+  const cfg = cycleCfg();
+  const prevCursor = state.cursor;
+  let last = null;
+  const next = advance(state, cfg, now, (event, at) => {
+    last = { event, at };
+    if (event === 'sit') {
+      const t = today();
+      t.breaks += 1;
+      t.standMin += Math.round(cfg.standMs / MIN);
+      saveHistory();
+    }
+  });
+  if (next !== state) {
+    const { phase, phaseEnd, off, cursor, duration } = next;
+    Object.assign(state, { phase, phaseEnd, off, cursor, duration });
+    if (state.cursor !== prevCursor) {
+      state.moveAlerted = false;
+      resetEyes();
+      if (state.phase === 'stand') pickExercise();
+      renderWeek();
+    }
+    saveState();
+    // Solo suena si el cambio acaba de ocurrir, no al volver horas después.
+    if (last && now - last.at < 90 * 1000) alertFor(last.event);
   }
 
-  if (state.pausedRemaining == null) {
+  if (!state.off) {
     if (state.phase === 'sit' && state.nextEyes && now >= state.nextEyes) {
       state.nextEyes += 20 * MIN;
       if (state.nextEyes > state.phaseEnd - MIN) state.nextEyes = null;
@@ -462,11 +596,6 @@ function tick() {
       state.moveAlerted = true;
       saveState();
       notify('move', 'Ahora muévete', 'Últimos 2 minutos: camina un poco antes de volver a sentarte.');
-    }
-
-    if (now >= state.phaseEnd) {
-      if (state.phase === 'sit') onSitEnd(now);
-      else onStandEnd(now);
     }
   }
   render();
@@ -493,18 +622,27 @@ function renderExercise() {
 
 function render() {
   const now = Date.now();
-  const idle = state.phase === 'idle';
-  const paused = state.pausedRemaining != null;
-  const remaining = idle ? durations().sit * MIN : paused ? state.pausedRemaining : state.phaseEnd - now;
-  const total = idle ? remaining : state.duration;
+  const idle = !state.running;
+  const paused = state.paused != null;
+  const off = state.running && state.off;
+  const resumeAt = off ? nextWindowStart(now, cycleCfg().hours) : 0;
+  let remaining;
+  if (idle) remaining = durations().sit * MIN;
+  else if (paused) remaining = state.paused;
+  else if (off) remaining = resumeAt - now;
+  else remaining = state.phaseEnd - now;
+  const total = idle || off ? remaining : state.duration;
 
-  document.body.classList.toggle('standing', state.phase === 'stand');
+  document.body.classList.toggle('standing', state.running && !off && state.phase === 'stand');
 
   let label;
   let hint;
   if (idle) {
     label = 'Listo para empezar';
     hint = 'Pulsa «Empezar» cuando te sientes a trabajar.';
+  } else if (off) {
+    label = 'Fuera de horario';
+    hint = `Volverá a empezar a las ${clock(resumeAt)}.`;
   } else if (state.phase === 'sit') {
     label = 'Sentado';
     hint = 'Trabaja tranquilo. Te avisaremos cuando toque levantarse.';
@@ -514,10 +652,7 @@ function render() {
       ? 'Últimos minutos: camina y muévete.'
       : 'Levántate y muévete. Te avisaremos cuando puedas sentarte.';
   }
-  if (paused) {
-    label += state.autoPaused ? ' · fuera de horario' : ' · en pausa';
-    if (state.autoPaused) hint = `Se reanudará a las ${settings.from}.`;
-  }
+  if (paused) label += ' · en pausa';
 
   $('phaseLabel').textContent = label;
   $('phaseHint').textContent = hint;
@@ -528,18 +663,19 @@ function render() {
   ring.style.strokeDasharray = String(RING_LEN);
   ring.style.strokeDashoffset = String(RING_LEN * (1 - frac));
 
-  $('exerciseBox').classList.toggle('hidden', !(state.phase === 'stand' && settings.exercises));
+  $('exerciseBox').classList.toggle('hidden', !(state.running && !off && state.phase === 'stand' && settings.exercises));
 
   $('startBtn').textContent = idle ? 'Empezar' : 'Reiniciar';
-  $('pauseBtn').disabled = idle;
+  $('pauseBtn').disabled = idle || off;
   $('pauseBtn').textContent = paused ? 'Reanudar' : 'Pausar';
-  $('skipBtn').disabled = idle;
+  $('skipBtn').disabled = idle || off;
   $('skipBtn').textContent = state.phase === 'stand' ? 'Ya me siento' : 'Levantarme ya';
   $('stopBtn').disabled = idle;
 
-  document.title = idle
+  document.title = idle || off
     ? 'Levántate'
     : `${state.phase === 'stand' ? '▲ De pie' : '● Sentado'} ${fmt(remaining)}${paused ? ' (pausa)' : ''}`;
+  renderPush();
 
   renderStats();
 }
@@ -602,6 +738,7 @@ function renderPresets() {
       settings.preset = id;
       saveSettings();
       renderPresets();
+      syncPush();
       render();
     });
     return b;
@@ -612,7 +749,7 @@ function renderPresets() {
   $('sitInput').disabled = settings.preset !== 'custom';
   $('standInput').disabled = settings.preset !== 'custom';
   let info = PRESETS[settings.preset].info;
-  if (state.phase !== 'idle') info += ' Los cambios se aplican a partir de la siguiente fase.';
+  if (state.running) info += ' Los cambios se aplican a partir de la siguiente fase.';
   $('presetInfo').textContent = info;
 }
 
@@ -644,10 +781,11 @@ function bindSettings() {
       if (key === 'wakeLock') updateWakeLock();
       if (key === 'sound') $('soundBox').classList.toggle('hidden', !el.checked);
       if (key === 'hoursOn') $('hoursBox').classList.toggle('hidden', !el.checked);
-      if (key === 'eyes' && state.phase === 'sit') {
+      if (key === 'eyes' && state.running && state.phase === 'sit') {
         state.nextEyes = el.checked && state.phaseEnd - Date.now() > 20 * MIN ? Date.now() + 20 * MIN : null;
         saveState();
       }
+      if (key === 'hoursOn') syncPush();
       tick();
     });
   }
@@ -676,6 +814,7 @@ function bindSettings() {
       if (!e.target.value) return;
       settings[key] = e.target.value;
       saveSettings();
+      syncPush();
       tick();
     });
   }
@@ -686,6 +825,7 @@ function bindSettings() {
       settings[key] = Number.isFinite(v) ? Math.min(max, Math.max(min, v)) : DEFAULT_SETTINGS[key];
       el.value = settings[key];
       saveSettings();
+      if (key !== 'goal') syncPush();
       render();
       renderWeek();
     });
@@ -708,8 +848,10 @@ function init() {
   if (!('vibrate' in navigator)) $('vibrateToggle').closest('label').classList.add('hidden');
   if (!('wakeLock' in navigator)) $('wakeToggle').closest('label').classList.add('hidden');
   updateWakeLock();
+  ensurePush(false).then((sub) => { if (sub && state.running) syncPush(); });
 
   $('startBtn').addEventListener('click', () => { start(); renderPresets(); });
+  $('pushTestBtn').addEventListener('click', testPush);
   $('pauseBtn').addEventListener('click', togglePause);
   $('skipBtn').addEventListener('click', skip);
   $('stopBtn').addEventListener('click', () => { stop(); renderPresets(); });
@@ -728,6 +870,7 @@ function init() {
       if (audioCtx && audioCtx.state !== 'running') audioCtx.resume().catch(() => {});
       tick();
       renderWeek();
+      if (pushSub) syncPush();
     }
     updateWakeLock();
   });
@@ -735,6 +878,9 @@ function init() {
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js').catch(() => {});
     navigator.serviceWorker.ready.then((reg) => { swReg = reg; });
+    navigator.serviceWorker.addEventListener('message', (e) => {
+      if (e.data && e.data.type === 'push') tick();
+    });
   }
 
   tick();
