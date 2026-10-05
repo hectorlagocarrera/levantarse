@@ -1,2 +1,2 @@
 // Dirección del servidor de avisos (Cloudflare Worker). Vacía = sin avisos con el móvil bloqueado.
-export const PUSH_URL = '';
+export const PUSH_URL = 'https://levantarse-push.hectorlagocarrera.workers.dev';
