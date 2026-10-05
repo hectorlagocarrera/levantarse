@@ -31,6 +31,15 @@ Abre la web publicada en GitHub Pages, pulsa **Empezar** y acepta las notificaci
 2. Elige la rama con la app y la carpeta **/ (root)**, y guarda.
 3. En un par de minutos estará en `https://hectorlagocarrera.github.io/levantarse/`. Cada push a esa rama la actualiza.
 
+## Avisos en el Calendario (iPhone bloqueado, sin servidor)
+
+La sección «Avisos en el Calendario» genera un archivo `.ics` con una alerta para levantarse y otra para
+sentarse en cada ciclo de tu jornada (`calendar.js`). Ábrelo en Safari en el iPhone y pulsa **Añadir todo**:
+las alertas del Calendario llegan aunque el iPhone esté bloqueado.
+
+Hay calendarios ya hechos para 9:00–18:00 de lunes a viernes en `calendarios/`
+(se regeneran con `node scripts/generar-calendarios.mjs`).
+
 ## Avisos con el móvil bloqueado (servidor gratuito en Cloudflare)
 
 iOS congela las webs cuando bloqueas el iPhone, así que los avisos a su hora los envía un pequeño servidor

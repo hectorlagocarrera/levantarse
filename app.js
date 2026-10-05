@@ -1,5 +1,6 @@
 import { advance, nextWindowStart } from './schedule.js';
 import { PUSH_URL } from './config.js';
+import { buildIcs, cycles } from './calendar.js';
 
 // ---------- Datos ----------
 
@@ -61,6 +62,9 @@ const DEFAULT_SETTINGS = {
   from: '09:00',
   to: '18:00',
   goal: 12,
+  calFrom: '09:00',
+  calTo: '18:00',
+  calWeekdays: true,
 };
 
 const KEYS = {
@@ -751,6 +755,7 @@ function renderPresets() {
   let info = PRESETS[settings.preset].info;
   if (state.running) info += ' Los cambios se aplican a partir de la siguiente fase.';
   $('presetInfo').textContent = info;
+  if ($('calSummary')) renderCalendar();
 }
 
 function renderPermission() {
@@ -827,6 +832,7 @@ function bindSettings() {
       saveSettings();
       if (key !== 'goal') syncPush();
       render();
+      renderCalendar();
       renderWeek();
     });
   };
@@ -836,12 +842,67 @@ function bindSettings() {
   clampInput($('goalInput'), 1, 30, 'goal');
 }
 
+// ---------- Calendario ----------
+
+function calOptions() {
+  const d = durations();
+  return { sit: d.sit, stand: d.stand, from: settings.calFrom, to: settings.calTo, weekdaysOnly: settings.calWeekdays };
+}
+
+function renderCalendar() {
+  const n = cycles(calOptions()).length;
+  const d = durations();
+  $('calSummary').textContent = n
+    ? `${n} pausas al día (${d.sit} min sentado / ${d.stand} min de pie), ${settings.calWeekdays ? 'de lunes a viernes' : 'todos los días'}.`
+    : 'El horario es demasiado corto para esta pauta.';
+  $('calBtn').disabled = n === 0;
+}
+
+function downloadCalendar() {
+  const ics = buildIcs(calOptions());
+  const url = URL.createObjectURL(new Blob([ics], { type: 'text/calendar;charset=utf-8' }));
+  if (IS_IOS) {
+    // Safari en iPhone abre el calendario directamente y ofrece «Añadir todo».
+    window.location.href = url;
+  } else {
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'levantate.ics';
+    document.body.append(a);
+    a.click();
+    a.remove();
+  }
+  setTimeout(() => URL.revokeObjectURL(url), 60 * 1000);
+}
+
+function bindCalendar() {
+  $('calFrom').value = settings.calFrom;
+  $('calTo').value = settings.calTo;
+  $('calWeekdays').checked = settings.calWeekdays;
+  for (const [id, key] of [['calFrom', 'calFrom'], ['calTo', 'calTo']]) {
+    $(id).addEventListener('change', (e) => {
+      if (!e.target.value) return;
+      settings[key] = e.target.value;
+      saveSettings();
+      renderCalendar();
+    });
+  }
+  $('calWeekdays').addEventListener('change', (e) => {
+    settings.calWeekdays = e.target.checked;
+    saveSettings();
+    renderCalendar();
+  });
+  $('calBtn').addEventListener('click', downloadCalendar);
+  renderCalendar();
+}
+
 function init() {
   pruneHistory();
   saveHistory();
   renderExercise();
   renderPresets();
   bindSettings();
+  bindCalendar();
   renderWeek();
   renderPermission();
   renderIosHelp();
