@@ -78,6 +78,23 @@
     <section class="card">
       <h2>Ajustes</h2>
       <label class="toggle"><input type="checkbox" id="soundToggle"> Sonido de aviso</label>
+      <div class="sound-box" id="soundBox">
+        <label>Sonido
+          <select id="soundType"></select>
+        </label>
+        <label><span>Volumen <span id="volumeVal"></span></span>
+          <input type="range" id="volumeInput" min="10" max="100" step="5">
+        </label>
+        <label>Repeticiones
+          <select id="repeatInput">
+            <option value="1">1 vez</option>
+            <option value="2">2 veces</option>
+            <option value="3">3 veces</option>
+            <option value="5">5 veces</option>
+          </select>
+        </label>
+        <button class="btn small-btn" id="soundTestBtn" type="button">▶ Escuchar</button>
+      </div>
       <label class="toggle"><input type="checkbox" id="vibrateToggle"> Vibración (móvil)</label>
       <label class="toggle"><input type="checkbox" id="exerciseToggle"> Sugerir ejercicios durante la pausa</label>
       <label class="toggle"><input type="checkbox" id="eyesToggle"> Recordatorio de vista 20-20-20 cada 20 min mientras estás sentado</label>

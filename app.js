@@ -49,6 +49,9 @@ const DEFAULT_SETTINGS = {
   sit: 30,
   stand: 5,
   sound: true,
+  soundType: 'campana',
+  volume: 90,
+  repeat: 2,
   vibrate: true,
   exercises: true,
   eyes: false,
@@ -158,44 +161,118 @@ function withinHours(d = new Date()) {
 // ---------- Avisos: sonido, vibración, notificación ----------
 
 let audioCtx = null;
+let masterOut = null;
 
 function unlockAudio() {
   if (!audioCtx) {
     const Ctx = window.AudioContext || window.webkitAudioContext;
-    if (Ctx) audioCtx = new Ctx();
+    if (!Ctx) return;
+    audioCtx = new Ctx();
+    // Compresor + ganancia final: permite subir mucho el volumen sin distorsionar.
+    const comp = audioCtx.createDynamicsCompressor();
+    comp.threshold.value = -24;
+    comp.knee.value = 6;
+    comp.ratio.value = 8;
+    comp.attack.value = 0.002;
+    comp.release.value = 0.15;
+    masterOut = audioCtx.createGain();
+    comp.connect(masterOut).connect(audioCtx.destination);
+    masterOut.comp = comp;
   }
-  if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  if (audioCtx.state === 'suspended') audioCtx.resume();
 }
 
-function playTones(freqs) {
-  if (!settings.sound || !audioCtx) return;
-  let t = audioCtx.currentTime + 0.05;
-  for (const f of freqs) {
+// Una nota: varias ondas (parciales) con envolvente de ataque y caída.
+function note(t, { f, type = 'sine', dur = 0.3, peak = 1, partials = [[1, 1]], sweepTo = null }) {
+  for (const [mult, amp] of partials) {
     const osc = audioCtx.createOscillator();
-    const gain = audioCtx.createGain();
-    osc.type = 'sine';
-    osc.frequency.value = f;
-    gain.gain.setValueAtTime(0.0001, t);
-    gain.gain.exponentialRampToValueAtTime(0.35, t + 0.03);
-    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.35);
-    osc.connect(gain).connect(audioCtx.destination);
+    const g = audioCtx.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(f * mult, t);
+    if (sweepTo) osc.frequency.linearRampToValueAtTime(sweepTo * mult, t + dur);
+    const p = Math.max(0.0002, peak * amp);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(p, t + 0.01);
+    if (type === 'sine' || type === 'triangle') {
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    } else {
+      g.gain.setValueAtTime(p, t + dur * 0.8);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    }
+    osc.connect(g).connect(masterOut.comp);
     osc.start(t);
-    osc.stop(t + 0.4);
-    t += 0.42;
+    osc.stop(t + dur + 0.05);
   }
 }
 
-const SOUNDS = {
-  stand: [523.25, 659.25, 783.99, 1046.5],
-  sit: [783.99, 523.25],
-  move: [659.25, 659.25],
-  eyes: [880],
+// Cada sonido define su patrón para «levantarse»; el de «sentarse» es más corto y descendente.
+const SOUND_TYPES = {
+  campana: {
+    name: 'Campana',
+    notes: [1046.5, 1318.5, 1568],
+    play: (t, f) => note(t, { f, dur: 1.1, partials: [[1, 1], [2.76, 0.35], [5.4, 0.15]] }),
+    step: 0.32,
+  },
+  alarma: {
+    name: 'Alarma',
+    notes: [880, 660, 880, 660, 880, 660],
+    play: (t, f) => note(t, { f, type: 'square', dur: 0.17, peak: 0.6 }),
+    step: 0.19,
+  },
+  digital: {
+    name: 'Reloj digital',
+    notes: [2000, 2000, 2000, 2000],
+    play: (t, f) => note(t, { f, type: 'square', dur: 0.07, peak: 0.55 }),
+    step: 0.13,
+  },
+  sirena: {
+    name: 'Sirena',
+    notes: [600, 600],
+    play: (t, f) => note(t, { f, type: 'sawtooth', dur: 0.55, peak: 0.45, sweepTo: f * 2 }),
+    step: 0.6,
+  },
+  marimba: {
+    name: 'Marimba',
+    notes: [523.25, 659.25, 783.99, 1046.5],
+    play: (t, f) => note(t, { f, type: 'triangle', dur: 0.4, partials: [[1, 1], [4, 0.2]] }),
+    step: 0.16,
+  },
+  gong: {
+    name: 'Gong',
+    notes: [196, 196],
+    play: (t, f) => note(t, { f, dur: 2.6, partials: [[1, 1], [1.48, 0.6], [2.03, 0.4], [2.97, 0.25]] }),
+    step: 1.4,
+  },
 };
+
+function soundPattern(kind) {
+  const def = SOUND_TYPES[settings.soundType] || SOUND_TYPES.campana;
+  if (kind === 'stand') return def.notes;
+  if (kind === 'sit') return def.notes.slice(0, 2).reverse();
+  return def.notes.slice(0, 1);
+}
+
+function playSound(kind, force = false) {
+  if ((!settings.sound && !force) || !audioCtx) return;
+  const def = SOUND_TYPES[settings.soundType] || SOUND_TYPES.campana;
+  const v = settings.volume / 100;
+  masterOut.gain.setValueAtTime(v * v * 2.5, audioCtx.currentTime); // curva perceptual con margen extra
+  const notes = soundPattern(kind);
+  const repeats = kind === 'eyes' ? 1 : settings.repeat;
+  let t = audioCtx.currentTime + 0.05;
+  for (let r = 0; r < repeats; r++) {
+    for (const f of notes) {
+      def.play(t, f);
+      t += def.step;
+    }
+    t += 0.6;
+  }
+}
 
 let swReg = null;
 
 async function notify(kind, title, body) {
-  playTones(SOUNDS[kind]);
+  playSound(kind);
   if (settings.vibrate && navigator.vibrate) {
     navigator.vibrate(kind === 'stand' ? [300, 150, 300, 150, 300] : [200, 100, 200]);
   }
@@ -517,6 +594,7 @@ function bindSettings() {
     el.addEventListener('change', () => {
       settings[key] = el.checked;
       saveSettings();
+      if (key === 'sound') $('soundBox').classList.toggle('hidden', !el.checked);
       if (key === 'hoursOn') $('hoursBox').classList.toggle('hidden', !el.checked);
       if (key === 'eyes' && state.phase === 'sit') {
         state.nextEyes = el.checked && state.phaseEnd - Date.now() > 20 * MIN ? Date.now() + 20 * MIN : null;
@@ -526,6 +604,23 @@ function bindSettings() {
     });
   }
   $('hoursBox').classList.toggle('hidden', !settings.hoursOn);
+
+  const soundSel = $('soundType');
+  soundSel.replaceChildren(...Object.entries(SOUND_TYPES).map(([id, d]) => new Option(d.name, id)));
+  soundSel.value = settings.soundType;
+  $('repeatInput').value = String(settings.repeat);
+  $('volumeInput').value = settings.volume;
+  $('volumeVal').textContent = settings.volume + '%';
+  $('soundBox').classList.toggle('hidden', !settings.sound);
+  const preview = () => { unlockAudio(); playSound('stand', true); };
+  soundSel.addEventListener('change', () => { settings.soundType = soundSel.value; saveSettings(); preview(); });
+  $('repeatInput').addEventListener('change', (e) => { settings.repeat = Number(e.target.value); saveSettings(); });
+  $('volumeInput').addEventListener('input', (e) => {
+    settings.volume = Number(e.target.value);
+    $('volumeVal').textContent = settings.volume + '%';
+  });
+  $('volumeInput').addEventListener('change', () => { saveSettings(); preview(); });
+  $('soundTestBtn').addEventListener('click', preview);
   $('hoursFrom').value = settings.from;
   $('hoursTo').value = settings.to;
   for (const [id, key] of [['hoursFrom', 'from'], ['hoursTo', 'to']]) {

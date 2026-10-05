@@ -238,6 +238,26 @@ body.standing { --accent: var(--stand); }
 .week-day { font-size: 0.75rem; color: var(--muted); margin-top: 4px; }
 .week-val { font-size: 0.7rem; color: var(--muted); }
 
+.sound-box {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+  margin: 4px 0 10px 26px;
+}
+.sound-box label { display: flex; flex-direction: column; font-size: 0.9rem; color: var(--muted); flex: 1 1 130px; }
+.sound-box select {
+  font: inherit;
+  margin-top: 4px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+}
+.sound-box input[type="range"] { margin-top: 10px; accent-color: var(--sit); }
+.sound-box .small-btn { margin-top: 0; }
+
 .toggle { display: flex; gap: 10px; align-items: flex-start; padding: 6px 0; cursor: pointer; }
 .toggle input { margin-top: 4px; accent-color: var(--sit); }
 
