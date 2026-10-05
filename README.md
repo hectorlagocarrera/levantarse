@@ -81,3 +81,18 @@ node worker/test/schedule.test.mjs
 # servidor de avisos en local
 cd worker && npx wrangler dev
 ```
+
+## Presupuestos (`presupuestos/`)
+
+App aparte para hacer presupuestos y recuperar a qué precio presupuestaste cada material a cada cliente.
+Publicada en `https://hectorlagocarrera.github.io/levantarse/presupuestos/`.
+
+- **Buscar precios**: escribe el cliente y el material (p. ej. «camisetas») y verás todas las veces que se lo
+  presupuestaste, con el último precio, el mínimo y el máximo. «Usar» añade esa línea a un presupuesto nuevo.
+- **Presupuesto**: al escribir un concepto te sugiere el último precio a ese cliente (o a otro, si nunca se lo
+  presupuestaste). Calcula descuentos, IVA y total; «Imprimir / PDF» lo saca con tus datos de empresa (pestaña Ajustes).
+- **Historial**: abre, duplica o borra presupuestos.
+- **Importar PDF**: lee cliente, fecha, número y líneas (concepto, cantidad, precio) de tus presupuestos en PDF
+  y te los enseña para revisarlos antes de guardar. Los PDF escaneados no tienen texto que leer.
+- Los datos se guardan en el navegador. Usa «Descargar copia» para tener una copia o pasarlos a otro equipo.
+  Los presupuestos de `presupuestos/datos.json` se añaden solos al abrir la app.

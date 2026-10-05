@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Presupuestos</title>
+  <meta name="description" content="Crea presupuestos y recupera el precio al que presupuestaste cada material a cada cliente.">
+  <meta name="theme-color" content="#1d4ed8">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="app">
+    <header class="top no-print">
+      <h1>Presupuestos</h1>
+      <nav class="tabs" role="tablist">
+        <button class="tab active" data-tab="buscar">Buscar precios</button>
+        <button class="tab" data-tab="editor">Presupuesto</button>
+        <button class="tab" data-tab="lista">Historial</button>
+        <button class="tab" data-tab="importar">Importar PDF</button>
+        <button class="tab" data-tab="ajustes">Ajustes</button>
+      </nav>
+    </header>
+
+    <!-- Buscar precios anteriores -->
+    <section class="panel no-print" id="tab-buscar">
+      <div class="card">
+        <h2>¿A qué precio se lo presupuesté?</h2>
+        <div class="grid2">
+          <label>Cliente
+            <input id="qCliente" list="clientes" placeholder="Todos los clientes" autocomplete="off">
+          </label>
+          <label>Material / concepto
+            <input id="qMaterial" list="conceptos" placeholder="p. ej. camisetas" autocomplete="off">
+          </label>
+        </div>
+        <div id="qResumen" class="summary"></div>
+      </div>
+      <div class="card">
+        <div class="table-wrap">
+          <table class="data">
+            <thead><tr><th>Fecha</th><th>Cliente</th><th>Nº</th><th>Concepto</th><th class="num">Cant.</th><th class="num">Precio</th><th></th></tr></thead>
+            <tbody id="qResultados"></tbody>
+          </table>
+        </div>
+        <p id="qVacio" class="muted">Aún no hay presupuestos guardados. Impórtalos en «Importar PDF» o crea uno nuevo.</p>
+      </div>
+    </section>
+
+    <!-- Editor de presupuesto -->
+    <section class="panel hidden" id="tab-editor">
+      <div class="card no-print">
+        <div class="row-between">
+          <h2 id="edTitulo">Nuevo presupuesto</h2>
+          <button class="btn ghost" id="edNuevo">Empezar uno nuevo</button>
+        </div>
+        <p id="edOrigen" class="muted hidden"></p>
+        <div class="grid4">
+          <label class="span2">Cliente
+            <input id="edCliente" list="clientes" autocomplete="off" placeholder="Nombre del cliente">
+          </label>
+          <label>Nº presupuesto <input id="edNumero"></label>
+          <label>Fecha <input id="edFecha" type="date"></label>
+        </div>
+        <div class="table-wrap">
+          <table class="data lines">
+            <thead><tr><th>Concepto</th><th class="num">Cant.</th><th class="num">Precio</th><th class="num">Dto. %</th><th class="num">Importe</th><th></th></tr></thead>
+            <tbody id="edLineas"></tbody>
+          </table>
+        </div>
+        <button class="btn ghost" id="edAddLinea">+ Añadir línea</button>
+        <div class="grid2 bottom">
+          <label>Notas / condiciones
+            <textarea id="edNotas" rows="3" placeholder="Plazo de entrega, forma de pago, validez…"></textarea>
+          </label>
+          <div class="totals">
+            <div><span>Base imponible</span><strong id="edBase">0,00 €</strong></div>
+            <div><span>IVA <input id="edIva" type="number" min="0" step="0.5" class="mini">%</span><strong id="edCuotaIva">0,00 €</strong></div>
+            <div class="grand"><span>Total</span><strong id="edTotal">0,00 €</strong></div>
+          </div>
+        </div>
+        <div class="actions">
+          <button class="btn" id="edGuardar">Guardar</button>
+          <button class="btn ghost" id="edImprimir">Imprimir / PDF</button>
+          <span id="edMsg" class="muted"></span>
+        </div>
+        <details id="edTexto" class="hidden">
+          <summary>Texto leído del PDF</summary>
+          <pre id="edTextoPdf"></pre>
+        </details>
+      </div>
+    </section>
+
+    <!-- Historial -->
+    <section class="panel hidden no-print" id="tab-lista">
+      <div class="card">
+        <div class="row-between">
+          <h2>Presupuestos guardados</h2>
+          <input id="lFiltro" placeholder="Filtrar por cliente, nº o concepto" class="filter">
+        </div>
+        <div class="table-wrap">
+          <table class="data">
+            <thead><tr><th>Fecha</th><th>Nº</th><th>Cliente</th><th class="num">Líneas</th><th class="num">Total</th><th></th></tr></thead>
+            <tbody id="lTabla"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- Importar -->
+    <section class="panel hidden no-print" id="tab-importar">
+      <div class="card">
+        <h2>Importar presupuestos en PDF</h2>
+        <p>Elige uno o varios PDF. La app lee cliente, fecha, número y líneas, y te los enseña para que los revises antes de guardar.</p>
+        <input type="file" id="pdfFiles" accept="application/pdf" multiple>
+        <p id="pdfMsg" class="muted"></p>
+        <p class="muted">Los PDF escaneados (fotos) no tienen texto que leer: en ese caso rellena el presupuesto a mano o pásamelos y los añado a <code>datos.json</code>.</p>
+      </div>
+      <div class="card">
+        <h2>Copia de seguridad</h2>
+        <p>Los datos se guardan en este navegador. Descarga una copia de vez en cuando o para pasarlos a otro ordenador.</p>
+        <div class="actions">
+          <button class="btn" id="bkExport">Descargar copia (.json)</button>
+          <label class="btn ghost file-btn">Cargar copia<input type="file" id="bkImport" accept="application/json,.json"></label>
+        </div>
+        <p id="bkMsg" class="muted"></p>
+      </div>
+    </section>
+
+    <!-- Ajustes -->
+    <section class="panel hidden no-print" id="tab-ajustes">
+      <div class="card">
+        <h2>Datos de tu empresa (salen en el presupuesto impreso)</h2>
+        <div class="grid2">
+          <label>Nombre <input data-ajuste="nombre"></label>
+          <label>CIF / NIF <input data-ajuste="cif"></label>
+          <label>Dirección <input data-ajuste="direccion"></label>
+          <label>Teléfono / email <input data-ajuste="contacto"></label>
+          <label>IVA por defecto (%) <input data-ajuste="iva" type="number" min="0" step="0.5"></label>
+          <label>Validez del presupuesto <input data-ajuste="validez" placeholder="30 días"></label>
+        </div>
+        <label>Condiciones por defecto
+          <textarea data-ajuste="condiciones" rows="3"></textarea>
+        </label>
+        <p class="muted">Se guardan solos.</p>
+      </div>
+    </section>
+
+    <datalist id="clientes"></datalist>
+    <datalist id="conceptos"></datalist>
+  </main>
+
+  <!-- Presupuesto para imprimir -->
+  <div id="print" class="print-only"></div>
+
+  <script src="parser.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
