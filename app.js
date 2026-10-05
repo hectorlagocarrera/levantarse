@@ -52,6 +52,7 @@ const DEFAULT_SETTINGS = {
   soundType: 'campana',
   volume: 90,
   repeat: 2,
+  wakeLock: true,
   vibrate: true,
   exercises: true,
   eyes: false,
@@ -252,8 +253,21 @@ function soundPattern(kind) {
   return def.notes.slice(0, 1);
 }
 
+// iOS: «playback» hace que suene aunque el iPhone esté en modo silencio.
+// Se vuelve a «auto» al terminar para no cortar la música de otras apps más de lo necesario.
+let sessionTimer = null;
+function holdAudioSession(seconds) {
+  if (!navigator.audioSession) return;
+  try { navigator.audioSession.type = 'playback'; } catch { return; }
+  clearTimeout(sessionTimer);
+  sessionTimer = setTimeout(() => {
+    try { navigator.audioSession.type = 'auto'; } catch { /* ignorado */ }
+  }, seconds * 1000 + 1500);
+}
+
 function playSound(kind, force = false) {
   if ((!settings.sound && !force) || !audioCtx) return;
+  if (audioCtx.state !== 'running') audioCtx.resume();
   const def = SOUND_TYPES[settings.soundType] || SOUND_TYPES.campana;
   const v = settings.volume / 100;
   masterOut.gain.setValueAtTime(v * v * 2.5, audioCtx.currentTime); // curva perceptual con margen extra
@@ -267,6 +281,7 @@ function playSound(kind, force = false) {
     }
     t += 0.6;
   }
+  holdAudioSession(t - audioCtx.currentTime + 2.5);
 }
 
 let swReg = null;
@@ -304,6 +319,35 @@ async function requestPermission() {
   renderPermission();
 }
 
+// ---------- iOS y pantalla encendida ----------
+
+const IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent)
+  || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const IS_STANDALONE = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+
+let wakeLock = null;
+
+async function updateWakeLock() {
+  const want = settings.wakeLock && state.phase !== 'idle' && !document.hidden;
+  if (want && !wakeLock && 'wakeLock' in navigator) {
+    try {
+      wakeLock = await navigator.wakeLock.request('screen');
+      wakeLock.addEventListener('release', () => { wakeLock = null; });
+    } catch { wakeLock = null; }
+  } else if (!want && wakeLock) {
+    wakeLock.release().catch(() => {});
+    wakeLock = null;
+  }
+}
+
+function renderIosHelp() {
+  const box = $('iosHelp');
+  if (!IS_IOS) { box.classList.add('hidden'); return; }
+  box.classList.remove('hidden');
+  $('iosInstall').classList.toggle('hidden', IS_STANDALONE);
+  box.open = !IS_STANDALONE;
+}
+
 // ---------- Lógica del temporizador ----------
 
 function startPhase(phase, now = Date.now()) {
@@ -319,6 +363,7 @@ function startPhase(phase, now = Date.now()) {
   state.nextEyes = phase === 'sit' && settings.eyes && minutes > 20 ? now + 20 * MIN : null;
   if (phase === 'stand') pickExercise();
   saveState();
+  updateWakeLock();
 }
 
 function start() {
@@ -331,6 +376,7 @@ function start() {
 function stop() {
   state = { ...state, phase: 'idle', pausedRemaining: null, autoPaused: false, nextEyes: null };
   saveState();
+  updateWakeLock();
   render();
 }
 
@@ -587,6 +633,7 @@ function bindSettings() {
     exerciseToggle: 'exercises',
     eyesToggle: 'eyes',
     hoursToggle: 'hoursOn',
+    wakeToggle: 'wakeLock',
   };
   for (const [id, key] of Object.entries(toggles)) {
     const el = $(id);
@@ -594,6 +641,7 @@ function bindSettings() {
     el.addEventListener('change', () => {
       settings[key] = el.checked;
       saveSettings();
+      if (key === 'wakeLock') updateWakeLock();
       if (key === 'sound') $('soundBox').classList.toggle('hidden', !el.checked);
       if (key === 'hoursOn') $('hoursBox').classList.toggle('hidden', !el.checked);
       if (key === 'eyes' && state.phase === 'sit') {
@@ -656,6 +704,10 @@ function init() {
   bindSettings();
   renderWeek();
   renderPermission();
+  renderIosHelp();
+  if (!('vibrate' in navigator)) $('vibrateToggle').closest('label').classList.add('hidden');
+  if (!('wakeLock' in navigator)) $('wakeToggle').closest('label').classList.add('hidden');
+  updateWakeLock();
 
   $('startBtn').addEventListener('click', () => { start(); renderPresets(); });
   $('pauseBtn').addEventListener('click', togglePause);
@@ -672,11 +724,17 @@ function init() {
 
   // Al volver a la pestaña, actualiza al instante (los navegadores ralentizan los temporizadores en segundo plano).
   document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) { tick(); renderWeek(); }
+    if (!document.hidden) {
+      if (audioCtx && audioCtx.state !== 'running') audioCtx.resume().catch(() => {});
+      tick();
+      renderWeek();
+    }
+    updateWakeLock();
   });
 
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('sw.js').then((reg) => { swReg = reg; }).catch(() => {});
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+    navigator.serviceWorker.ready.then((reg) => { swReg = reg; });
   }
 
   tick();

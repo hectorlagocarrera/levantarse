@@ -1,5 +1,5 @@
 // Service worker: funcionamiento sin conexión y gestión de clics en notificaciones.
-const CACHE = 'levantarse-v2';
+const CACHE = 'levantarse-v3';
 const ASSETS = [
   './',
   'index.html',

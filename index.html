@@ -9,6 +9,9 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Levántate">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -17,6 +20,15 @@
       <h1>Levántate</h1>
       <p class="subtitle">Rompe el tiempo sentado antes de que te rompa a ti.</p>
     </header>
+
+    <details class="card ios-help hidden" id="iosHelp">
+      <summary>Uso en iPhone</summary>
+      <ol>
+        <li id="iosInstall">Pulsa <strong>Compartir</strong> <span aria-hidden="true">⬆︎</span> → <strong>Añadir a pantalla de inicio</strong> y abre la app desde ese icono. Solo así iOS permite notificaciones.</li>
+        <li>iOS detiene las webs al bloquear la pantalla o cambiar de app. Deja la app <strong>abierta en primer plano</strong> con «Mantener la pantalla encendida» activado (por ejemplo, con el móvil en un soporte junto al ordenador).</li>
+        <li>El sonido suena aunque el iPhone esté en silencio; el volumen lo marcan los botones laterales.</li>
+      </ol>
+    </details>
 
     <section class="card timer-card" aria-live="polite">
       <div class="phase" id="phaseLabel">Listo para empezar</div>
@@ -96,6 +108,7 @@
         <button class="btn small-btn" id="soundTestBtn" type="button">▶ Escuchar</button>
       </div>
       <label class="toggle"><input type="checkbox" id="vibrateToggle"> Vibración (móvil)</label>
+      <label class="toggle"><input type="checkbox" id="wakeToggle"> Mantener la pantalla encendida mientras el temporizador está en marcha</label>
       <label class="toggle"><input type="checkbox" id="exerciseToggle"> Sugerir ejercicios durante la pausa</label>
       <label class="toggle"><input type="checkbox" id="eyesToggle"> Recordatorio de vista 20-20-20 cada 20 min mientras estás sentado</label>
       <label class="toggle"><input type="checkbox" id="hoursToggle"> Avisar solo en horario laboral</label>
