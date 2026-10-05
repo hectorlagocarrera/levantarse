@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Levántate</title>
+  <meta name="description" content="Recordatorios para levantarte y moverte mientras trabajas sentado, con pautas recomendadas por estudios médicos.">
+  <meta name="theme-color" content="#0f766e">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="app">
+    <header class="top">
+      <h1>Levántate</h1>
+      <p class="subtitle">Rompe el tiempo sentado antes de que te rompa a ti.</p>
+    </header>
+
+    <section class="card timer-card" aria-live="polite">
+      <div class="phase" id="phaseLabel">Listo para empezar</div>
+      <div class="ring-wrap">
+        <svg class="ring" viewBox="0 0 120 120" aria-hidden="true">
+          <circle class="ring-bg" cx="60" cy="60" r="52"></circle>
+          <circle class="ring-fg" id="ringFg" cx="60" cy="60" r="52"></circle>
+        </svg>
+        <div class="time" id="timeLeft">30:00</div>
+      </div>
+      <div class="hint" id="phaseHint">Pulsa «Empezar» cuando te sientes a trabajar.</div>
+
+      <div class="exercise hidden" id="exerciseBox">
+        <div class="exercise-title">Mientras estás de pie prueba:</div>
+        <div class="exercise-name" id="exerciseName"></div>
+        <div class="exercise-desc" id="exerciseDesc"></div>
+        <button class="link" id="nextExercise" type="button">Otra sugerencia</button>
+      </div>
+
+      <div class="controls">
+        <button class="btn primary" id="startBtn" type="button">Empezar</button>
+        <button class="btn" id="pauseBtn" type="button" disabled>Pausar</button>
+        <button class="btn" id="skipBtn" type="button" disabled>Saltar fase</button>
+        <button class="btn ghost" id="stopBtn" type="button" disabled>Detener</button>
+      </div>
+      <div class="notice hidden" id="permNotice">
+        Las notificaciones están desactivadas. Solo oirás el sonido con la pestaña abierta.
+        <button class="link" id="permBtn" type="button">Activar notificaciones</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Pauta</h2>
+      <div class="presets" id="presets" role="radiogroup" aria-label="Pauta de pausas"></div>
+      <div class="custom" id="customBox">
+        <label>Sentado (min)
+          <input type="number" id="sitInput" min="1" max="180" step="1">
+        </label>
+        <label>De pie / moviéndote (min)
+          <input type="number" id="standInput" min="1" max="60" step="1">
+        </label>
+      </div>
+      <p class="preset-info" id="presetInfo"></p>
+    </section>
+
+    <section class="card">
+      <h2>Hoy</h2>
+      <div class="stats">
+        <div class="stat"><span class="stat-num" id="statBreaks">0</span><span class="stat-label">pausas hechas</span></div>
+        <div class="stat"><span class="stat-num" id="statStand">0</span><span class="stat-label">min de pie</span></div>
+        <div class="stat"><span class="stat-num" id="statSkipped">0</span><span class="stat-label">pausas saltadas</span></div>
+        <div class="stat"><span class="stat-num" id="statGoal">0%</span><span class="stat-label">objetivo diario</span></div>
+      </div>
+      <div class="goal-bar"><div class="goal-fill" id="goalFill"></div></div>
+      <p class="small">Objetivo: <input type="number" id="goalInput" min="1" max="30" class="inline-num"> pausas al día.</p>
+      <div class="week" id="weekChart" aria-label="Pausas de los últimos 7 días"></div>
+    </section>
+
+    <section class="card">
+      <h2>Ajustes</h2>
+      <label class="toggle"><input type="checkbox" id="soundToggle"> Sonido de aviso</label>
+      <label class="toggle"><input type="checkbox" id="vibrateToggle"> Vibración (móvil)</label>
+      <label class="toggle"><input type="checkbox" id="exerciseToggle"> Sugerir ejercicios durante la pausa</label>
+      <label class="toggle"><input type="checkbox" id="eyesToggle"> Recordatorio de vista 20-20-20 cada 20 min mientras estás sentado</label>
+      <label class="toggle"><input type="checkbox" id="hoursToggle"> Avisar solo en horario laboral</label>
+      <div class="custom hours" id="hoursBox">
+        <label>Desde <input type="time" id="hoursFrom"></label>
+        <label>Hasta <input type="time" id="hoursTo"></label>
+      </div>
+      <button class="btn small-btn" id="testBtn" type="button">Probar aviso</button>
+    </section>
+
+    <section class="card evidence">
+      <h2>¿Por qué estos valores?</h2>
+      <ul>
+        <li><strong>OMS (2020)</strong>: recomienda limitar el tiempo sedentario y sustituirlo por actividad física de cualquier intensidad, incluso ligera.</li>
+        <li><strong>Universidad de Columbia (Diaz et al., 2023)</strong>: de varias pautas probadas, <em>5 minutos de caminata ligera cada 30 minutos</em> fue la que más redujo la glucosa tras las comidas y la tensión arterial.</li>
+        <li><strong>Ergonomía de la Universidad de Cornell</strong>: ciclo de 30 minutos con <em>20 sentado, 8 de pie y 2 moviéndote</em>. Estar de pie quieto demasiado tiempo también es perjudicial; lo importante es alternar y moverse.</li>
+        <li>No pases más de <strong>60 minutos</strong> seguidos sentado.</li>
+      </ul>
+      <p class="small">Esta app es una ayuda, no sustituye el consejo de tu médico. Si tienes alguna lesión o patología, consulta qué pauta te conviene.</p>
+    </section>
+
+    <footer class="foot small">
+      Mantén esta página abierta (puede estar en segundo plano). Puedes instalarla como app desde el menú del navegador.
+    </footer>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
