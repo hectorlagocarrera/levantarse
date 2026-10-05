@@ -27,9 +27,9 @@ Abre la web publicada en GitHub Pages, pulsa **Empezar** y acepta las notificaci
 
 ## Publicación (GitHub Pages)
 
-1. En el repositorio: **Settings → Pages → Source: GitHub Actions**.
-2. Cada push a `main` despliega automáticamente con `.github/workflows/pages.yml` (también se puede lanzar a mano desde la pestaña *Actions*).
-3. La URL será `https://<usuario>.github.io/levantarse/`.
+1. En el repositorio: **Settings → Pages → Build and deployment → Source: Deploy from a branch**.
+2. Elige la rama con la app y la carpeta **/ (root)**, y guarda.
+3. En un par de minutos estará en `https://hectorlagocarrera.github.io/levantarse/`. Cada push a esa rama la actualiza.
 
 ## Desarrollo local
 
